@@ -33,8 +33,8 @@ jobs:
           name: dist
           path: dist/
 
-  test-npm:
-    name: Test with npm lockfile
+  test:
+    name: Integration tests
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,140 +47,74 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Create test lockfile
-        run: |
-          mkdir -p /tmp/test-project
-          cd /tmp/test-project
-          npm init -y
-          npm install lodash
-          cat package-lock.json
-
-      - name: Run safe-pkgs audit
-        id: audit
+      - name: Test npm lockfile audit
+        id: npm-audit
         uses: ./
         with:
-          path: /tmp/test-project
+          path: tests/fixtures/npm
           fail-on-severity: critical
         continue-on-error: true
 
-      - name: Verify outputs
+      - name: Verify npm outputs
         run: |
-          echo "allow: ${{ steps.audit.outputs.allow }}"
-          echo "risk: ${{ steps.audit.outputs.risk }}"
-          echo "total: ${{ steps.audit.outputs.total }}"
-          echo "denied: ${{ steps.audit.outputs.denied }}"
+          echo "allow: ${{ steps.npm-audit.outputs.allow }}"
+          echo "risk: ${{ steps.npm-audit.outputs.risk }}"
+          echo "total: ${{ steps.npm-audit.outputs.total }}"
+          echo "denied: ${{ steps.npm-audit.outputs.denied }}"
 
-          if [ -z "${{ steps.audit.outputs.total }}" ]; then
-            echo "::error::Missing 'total' output"
+          if [ -z "${{ steps.npm-audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output from npm audit"
             exit 1
           fi
-          echo "All outputs present"
 
-  test-cargo:
-    name: Test with Cargo lockfile
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Create test lockfile
-        run: |
-          mkdir -p /tmp/test-rust
-          cd /tmp/test-rust
-          cargo init
-          cargo generate-lockfile
-          cat Cargo.lock
-
-      - name: Run safe-pkgs audit
-        id: audit
+      - name: Test cargo lockfile audit
+        id: cargo-audit
         uses: ./
         with:
-          path: /tmp/test-rust
+          path: tests/fixtures/cargo
           fail-on-severity: critical
         continue-on-error: true
 
-      - name: Verify outputs
+      - name: Verify cargo outputs
         run: |
-          echo "allow: ${{ steps.audit.outputs.allow }}"
-          echo "risk: ${{ steps.audit.outputs.risk }}"
-          echo "total: ${{ steps.audit.outputs.total }}"
-          if [ -z "${{ steps.audit.outputs.total }}" ]; then
-            echo "::error::Missing 'total' output"
+          echo "allow: ${{ steps.cargo-audit.outputs.allow }}"
+          echo "risk: ${{ steps.cargo-audit.outputs.risk }}"
+          echo "total: ${{ steps.cargo-audit.outputs.total }}"
+
+          if [ -z "${{ steps.cargo-audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output from cargo audit"
             exit 1
           fi
 
-  test-autodetect:
-    name: Test auto-detection
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Create test project with yarn.lock
-        run: |
-          mkdir -p /tmp/test-yarn
-          echo '# yarn lockfile v1' > /tmp/test-yarn/yarn.lock
-
-      - name: Run safe-pkgs audit
-        id: audit
+      - name: Test auto-detection
+        id: autodetect-audit
         uses: ./
         with:
-          path: /tmp/test-yarn
+          path: tests/fixtures/npm
           fail-on-severity: off
         continue-on-error: true
 
-      - name: Verify registry was auto-detected
+      - name: Verify auto-detection worked
         run: |
-          echo "Action completed (may have failed on empty lockfile, that's OK)"
-          echo "The important thing is it didn't fail on registry detection"
+          if [ -z "${{ steps.autodetect-audit.outputs.risk }}" ]; then
+            echo "::error::Auto-detection failed — no risk output"
+            exit 1
+          fi
+          echo "Auto-detection succeeded"
 
-  test-explicit-registry:
-    name: Test explicit registry
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Create test lockfile
-        run: |
-          mkdir -p /tmp/test-explicit
-          cd /tmp/test-explicit
-          npm init -y
-          npm install express
-          cat package-lock.json
-
-      - name: Run safe-pkgs audit with explicit registry
-        id: audit
+      - name: Test explicit registry
+        id: explicit-audit
         uses: ./
         with:
-          path: /tmp/test-explicit
+          path: tests/fixtures/npm
           registry: npm
           fail-on-severity: off
         continue-on-error: true
 
-      - name: Verify outputs
+      - name: Verify explicit registry outputs
         run: |
-          echo "allow: ${{ steps.audit.outputs.allow }}"
-          echo "risk: ${{ steps.audit.outputs.risk }}"
-          echo "total: ${{ steps.audit.outputs.total }}"
+          if [ -z "${{ steps.explicit-audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output from explicit registry audit"
+            exit 1
+          fi
+          echo "Explicit registry test passed"
