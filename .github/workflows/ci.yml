@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Biome check
+        run: bunx biome check src tests
+
+      - name: TypeScript type check
+        run: bunx tsc --noEmit
+
+      - name: Unit tests
+        run: bun test
+
+      - name: Build
+        run: bun run build

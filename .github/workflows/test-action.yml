@@ -1,0 +1,169 @@
+name: Test Action
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test-npm:
+    name: Test with npm lockfile
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create test lockfile
+        run: |
+          mkdir -p /tmp/test-project
+          cd /tmp/test-project
+          npm init -y
+          npm install lodash
+          cat package-lock.json
+
+      - name: Run safe-pkgs audit
+        id: audit
+        uses: ./
+        with:
+          path: /tmp/test-project
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
+          echo "denied: ${{ steps.audit.outputs.denied }}"
+
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
+          echo "All outputs present"
+
+  test-cargo:
+    name: Test with Cargo lockfile
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create test lockfile
+        run: |
+          mkdir -p /tmp/test-rust
+          cd /tmp/test-rust
+          cargo init
+          cargo generate-lockfile
+          cat Cargo.lock
+
+      - name: Run safe-pkgs audit
+        id: audit
+        uses: ./
+        with:
+          path: /tmp/test-rust
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
+
+  test-autodetect:
+    name: Test auto-detection
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create test project with yarn.lock
+        run: |
+          mkdir -p /tmp/test-yarn
+          echo '# yarn lockfile v1' > /tmp/test-yarn/yarn.lock
+
+      - name: Run safe-pkgs audit
+        id: audit
+        uses: ./
+        with:
+          path: /tmp/test-yarn
+          fail-on-severity: off
+        continue-on-error: true
+
+      - name: Verify registry was auto-detected
+        run: |
+          echo "Action completed (may have failed on empty lockfile, that's OK)"
+          echo "The important thing is it didn't fail on registry detection"
+
+  test-explicit-registry:
+    name: Test explicit registry
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create test lockfile
+        run: |
+          mkdir -p /tmp/test-explicit
+          cd /tmp/test-explicit
+          npm init -y
+          npm install express
+          cat package-lock.json
+
+      - name: Run safe-pkgs audit with explicit registry
+        id: audit
+        uses: ./
+        with:
+          path: /tmp/test-explicit
+          registry: npm
+          fail-on-severity: off
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"

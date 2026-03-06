@@ -1,0 +1,38 @@
+name: 'safe-pkgs Audit'
+description: 'Audit project dependencies for supply-chain risks using safe-pkgs'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to lockfile or project directory'
+    required: false
+    default: '.'
+  registry:
+    description: 'Registry override (npm, cargo, pypi). Auto-detects from lockfile if omitted.'
+    required: false
+  version:
+    description: 'safe-pkgs release version to download'
+    required: false
+    default: 'latest'
+  fail-on-severity:
+    description: 'Fail the workflow if any package meets this severity (low, medium, high, critical, off)'
+    required: false
+    default: 'high'
+
+outputs:
+  allow:
+    description: '"true" or "false" — overall audit result'
+  risk:
+    description: 'Highest severity found'
+  total:
+    description: 'Total packages audited'
+  denied:
+    description: 'Number of denied packages'
+  json:
+    description: 'Raw JSON output from safe-pkgs'
+
+runs:
+  using: 'node24'
+  main: 'dist/index.js'
