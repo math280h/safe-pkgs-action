@@ -19,6 +19,42 @@ export function meetsThreshold(reportRisk: Severity, failOn: string): boolean {
 }
 
 /**
+ * Merge multiple audit reports into a single aggregate report.
+ */
+/**
+ * Merge multiple audit reports into a single aggregate report.
+ * Each report's packages are tagged with the source lockfile path.
+ */
+export function mergeReports(
+  reports: { source: string; report: LockfileResponse }[],
+): LockfileResponse {
+  let allow = true;
+  let risk: Severity = "Low";
+  let total = 0;
+  let denied = 0;
+  const packages: LockfileResponse["packages"] = [];
+
+  for (const { source, report } of reports) {
+    if (!report.allow) allow = false;
+    if (severityRank(report.risk) > severityRank(risk)) risk = report.risk;
+    total += report.total;
+    denied += report.denied;
+    for (const pkg of report.packages) {
+      packages.push({ ...pkg, source });
+    }
+  }
+
+  return {
+    allow,
+    risk,
+    total,
+    denied,
+    packages,
+    fingerprints: reports[0].report.fingerprints,
+  };
+}
+
+/**
  * Set action outputs, create annotations for denied packages, and write the job summary.
  */
 export async function processReport(
@@ -35,7 +71,8 @@ export async function processReport(
   // Annotations for denied packages
   for (const pkg of report.packages) {
     if (pkg.allow) continue;
-    const title = `${pkg.name}${pkg.requested ? `@${pkg.requested}` : ""} — ${pkg.risk} risk`;
+    const sourceTag = pkg.source ? ` (${pkg.source})` : "";
+    const title = `${pkg.name}${pkg.requested ? `@${pkg.requested}` : ""} — ${pkg.risk} risk${sourceTag}`;
     const message = pkg.reasons.join("\n");
     if (severityRank(pkg.risk) >= severityRank("High")) {
       core.error(message, { title });
@@ -75,14 +112,27 @@ export function renderSummary(report: LockfileResponse): string {
   );
 
   const denied = report.packages.filter((p) => !p.allow);
+  const hasSources = denied.some((p) => p.source);
   if (denied.length > 0) {
     lines.push(`### Denied Packages\n`);
-    lines.push(`| Package | Version | Risk | Reasons |`);
-    lines.push(`|---------|---------|------|---------|`);
+    if (hasSources) {
+      lines.push(`| Package | Version | Risk | Source | Reasons |`);
+      lines.push(`|---------|---------|------|--------|---------|`);
+    } else {
+      lines.push(`| Package | Version | Risk | Reasons |`);
+      lines.push(`|---------|---------|------|---------|`);
+    }
     for (const pkg of denied) {
       const version = pkg.requested ?? "—";
       const reasons = pkg.reasons.join("; ");
-      lines.push(`| ${pkg.name} | ${version} | ${pkg.risk} | ${reasons} |`);
+      if (hasSources) {
+        const source = pkg.source ?? "—";
+        lines.push(
+          `| ${pkg.name} | ${version} | ${pkg.risk} | ${source} | ${reasons} |`,
+        );
+      } else {
+        lines.push(`| ${pkg.name} | ${version} | ${pkg.risk} | ${reasons} |`);
+      }
     }
     lines.push("");
   }

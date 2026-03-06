@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { meetsThreshold, renderSummary } from "../src/report.js";
+import { meetsThreshold, mergeReports, renderSummary } from "../src/report.js";
 import type { LockfileResponse, Severity } from "../src/types.js";
 
 function makeReport(
@@ -155,5 +155,92 @@ describe("renderSummary", () => {
     const md = renderSummary(report);
     expect(md).toContain("| Metric | Value |");
     expect(md).toContain("|--------|-------|");
+  });
+});
+
+describe("mergeReports", () => {
+  it("merges totals and denied counts", () => {
+    const merged = mergeReports([
+      {
+        source: "a/package-lock.json",
+        report: makeReport({ total: 3, denied: 1 }),
+      },
+      { source: "b/Cargo.lock", report: makeReport({ total: 5, denied: 2 }) },
+    ]);
+    expect(merged.total).toBe(8);
+    expect(merged.denied).toBe(3);
+  });
+
+  it("takes the highest risk", () => {
+    const merged = mergeReports([
+      { source: "a", report: makeReport({ risk: "Low" }) },
+      { source: "b", report: makeReport({ risk: "High" }) },
+      { source: "c", report: makeReport({ risk: "Medium" }) },
+    ]);
+    expect(merged.risk).toBe("High");
+  });
+
+  it("sets allow to false if any report denies", () => {
+    const merged = mergeReports([
+      { source: "a", report: makeReport({ allow: true }) },
+      { source: "b", report: makeReport({ allow: false }) },
+    ]);
+    expect(merged.allow).toBe(false);
+  });
+
+  it("keeps allow true when all reports allow", () => {
+    const merged = mergeReports([
+      { source: "a", report: makeReport({ allow: true }) },
+      { source: "b", report: makeReport({ allow: true }) },
+    ]);
+    expect(merged.allow).toBe(true);
+  });
+
+  it("concatenates packages and tags with source", () => {
+    const merged = mergeReports([
+      {
+        source: "frontend/package-lock.json",
+        report: makeReport({
+          packages: [
+            {
+              name: "a",
+              requested: "1.0.0",
+              allow: true,
+              risk: "Low",
+              reasons: [],
+              evidence: [],
+            },
+          ],
+        }),
+      },
+      {
+        source: "backend/Cargo.lock",
+        report: makeReport({
+          packages: [
+            {
+              name: "b",
+              requested: "2.0.0",
+              allow: false,
+              risk: "High",
+              reasons: ["bad"],
+              evidence: [],
+            },
+            {
+              name: "c",
+              requested: "3.0.0",
+              allow: true,
+              risk: "Low",
+              reasons: [],
+              evidence: [],
+            },
+          ],
+        }),
+      },
+    ]);
+    expect(merged.packages).toHaveLength(3);
+    expect(merged.packages.map((p) => p.name)).toEqual(["a", "b", "c"]);
+    expect(merged.packages[0].source).toBe("frontend/package-lock.json");
+    expect(merged.packages[1].source).toBe("backend/Cargo.lock");
+    expect(merged.packages[2].source).toBe("backend/Cargo.lock");
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { detectRegistry } from "../src/detect.js";
+import { detectRegistry, discoverLockfiles } from "../src/detect.js";
 
 function withTempDir(fn: (dir: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "detect-test-"));
@@ -109,6 +109,85 @@ describe("detectRegistry", () => {
   it("returns null for empty directory", () => {
     withTempDir((dir) => {
       expect(detectRegistry(dir)).toBeNull();
+    });
+  });
+});
+
+describe("discoverLockfiles", () => {
+  it("finds lockfiles in root directory", () => {
+    withTempDir((dir) => {
+      fs.writeFileSync(path.join(dir, "package-lock.json"), "{}");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].registry).toBe("npm");
+    });
+  });
+
+  it("finds lockfiles in nested directories", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "apps", "frontend"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "apps", "backend"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "apps", "frontend", "package-lock.json"),
+        "{}",
+      );
+      fs.writeFileSync(path.join(dir, "apps", "backend", "Cargo.lock"), "");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(2);
+      const registries = results.map((r) => r.registry).sort();
+      expect(registries).toEqual(["cargo", "npm"]);
+    });
+  });
+
+  it("skips node_modules", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, "node_modules", "dep"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "node_modules", "dep", "package-lock.json"),
+        "{}",
+      );
+      fs.writeFileSync(path.join(dir, "Cargo.lock"), "");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].registry).toBe("cargo");
+    });
+  });
+
+  it("skips .git directory", () => {
+    withTempDir((dir) => {
+      fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".git", "package-lock.json"), "{}");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(0);
+    });
+  });
+
+  it("returns empty array for empty directory", () => {
+    withTempDir((dir) => {
+      expect(discoverLockfiles(dir)).toEqual([]);
+    });
+  });
+
+  it("finds multiple lockfile types in same directory", () => {
+    withTempDir((dir) => {
+      fs.writeFileSync(path.join(dir, "package-lock.json"), "{}");
+      fs.writeFileSync(path.join(dir, "requirements.txt"), "");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(2);
+      const registries = results.map((r) => r.registry).sort();
+      expect(registries).toEqual(["npm", "pypi"]);
+    });
+  });
+
+  it("finds lockfiles deeply nested", () => {
+    withTempDir((dir) => {
+      const deep = path.join(dir, "a", "b", "c");
+      fs.mkdirSync(deep, { recursive: true });
+      fs.writeFileSync(path.join(deep, "Cargo.lock"), "");
+      const results = discoverLockfiles(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].registry).toBe("cargo");
+      expect(results[0].path).toBe(path.join(deep, "Cargo.lock"));
     });
   });
 });

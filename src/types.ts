@@ -24,6 +24,8 @@ export interface LockfilePackageResult {
   reasons: string[];
   evidence: Evidence[];
   dependency_ancestry?: DependencyAncestry;
+  /** Set by the action when merging multiple lockfile audits. */
+  source?: string;
 }
 
 export interface DecisionFingerprints {

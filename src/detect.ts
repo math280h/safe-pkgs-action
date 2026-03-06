@@ -12,9 +12,16 @@ const LOCKFILE_REGISTRY_MAP: Record<string, string> = {
   "Pipfile.lock": "pypi",
 };
 
+const LOCKFILE_NAMES = new Set(Object.keys(LOCKFILE_REGISTRY_MAP));
+
+export interface LockfileTarget {
+  path: string;
+  registry: string;
+}
+
 /**
  * Detect the registry from a path. If `p` is a file, match its basename.
- * If `p` is a directory, scan for known lockfiles.
+ * If `p` is a directory, check for lockfiles in that directory only.
  * Returns the registry key or null if nothing matched.
  */
 export function detectRegistry(p: string): string | null {
@@ -32,4 +39,46 @@ export function detectRegistry(p: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Recursively discover all lockfiles under a directory.
+ * Returns a list of lockfile paths with their detected registry.
+ * Skips node_modules, .git, and other common non-project directories.
+ */
+export function discoverLockfiles(dir: string): LockfileTarget[] {
+  const results: LockfileTarget[] = [];
+  const skipDirs = new Set([
+    "node_modules",
+    ".git",
+    "target",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+  ]);
+
+  function walk(current: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) {
+          walk(path.join(current, entry.name));
+        }
+      } else if (entry.isFile() && LOCKFILE_NAMES.has(entry.name)) {
+        const registry = LOCKFILE_REGISTRY_MAP[entry.name];
+        results.push({ path: path.join(current, entry.name), registry });
+      }
+    }
+  }
+
+  walk(dir);
+  return results;
 }

@@ -4,8 +4,12 @@ import * as path from "node:path";
 import * as core from "@actions/core";
 import * as exec from "@actions/exec";
 import * as tc from "@actions/tool-cache";
-import { detectRegistry } from "./detect.js";
-import { processReport } from "./report.js";
+import {
+  detectRegistry,
+  discoverLockfiles,
+  type LockfileTarget,
+} from "./detect.js";
+import { mergeReports, processReport } from "./report.js";
 import type { LockfileResponse } from "./types.js";
 
 function getPlatformAsset(): string {
@@ -65,34 +69,15 @@ async function downloadBinary(version: string): Promise<string> {
   return path.join(cachedDir, binaryName);
 }
 
-async function run(): Promise<void> {
-  const inputPath = core.getInput("path") || ".";
-  const registryInput = core.getInput("registry");
-  const version = core.getInput("version") || "latest";
-  const failSeverity = core.getInput("fail-on-severity") || "high";
-
-  // Resolve registry
-  let registry = registryInput;
-  if (!registry) {
-    registry = detectRegistry(inputPath) ?? "";
-    if (!registry) {
-      throw new Error(
-        `Could not auto-detect registry for path "${inputPath}". ` +
-          `Please set the "registry" input explicitly.`,
-      );
-    }
-    core.info(`Auto-detected registry: ${registry}`);
-  }
-
-  // Download binary
-  const binaryPath = await downloadBinary(version);
-  core.info(`Using safe-pkgs at ${binaryPath}`);
-
-  // Run audit
+async function runAudit(
+  binaryPath: string,
+  target: string,
+  registry: string,
+): Promise<LockfileResponse> {
   let stdout = "";
   const exitCode = await exec.exec(
     binaryPath,
-    ["audit", inputPath, "--registry", registry],
+    ["audit", target, "--registry", registry],
     {
       listeners: {
         stdout: (data: Buffer) => {
@@ -104,20 +89,90 @@ async function run(): Promise<void> {
   );
 
   if (exitCode !== 0 && !stdout.trim()) {
-    throw new Error(`safe-pkgs exited with code ${exitCode} and no output`);
+    throw new Error(
+      `safe-pkgs exited with code ${exitCode} and no output for ${target}`,
+    );
   }
 
-  // Parse output
-  let report: LockfileResponse;
   try {
-    report = JSON.parse(stdout) as LockfileResponse;
+    return JSON.parse(stdout) as LockfileResponse;
   } catch {
-    core.error(`Raw output:\n${stdout}`);
-    throw new Error("Failed to parse safe-pkgs JSON output");
+    core.error(`Raw output for ${target}:\n${stdout}`);
+    throw new Error(`Failed to parse safe-pkgs JSON output for ${target}`);
+  }
+}
+
+function resolveTargets(
+  inputPath: string,
+  registryInput: string,
+): LockfileTarget[] {
+  const stat = fs.statSync(inputPath, { throwIfNoEntry: false });
+  if (!stat) {
+    throw new Error(`Path "${inputPath}" does not exist`);
   }
 
-  // Process results
-  await processReport(report, failSeverity);
+  // Explicit registry — use path as-is
+  if (registryInput) {
+    return [{ path: inputPath, registry: registryInput }];
+  }
+
+  // File path — detect from filename
+  if (stat.isFile()) {
+    const registry = detectRegistry(inputPath);
+    if (!registry) {
+      throw new Error(
+        `Could not detect registry for file "${inputPath}". ` +
+          `Please set the "registry" input explicitly.`,
+      );
+    }
+    return [{ path: inputPath, registry }];
+  }
+
+  // Directory — recursively discover lockfiles
+  const targets = discoverLockfiles(inputPath);
+  if (targets.length === 0) {
+    throw new Error(
+      `No lockfiles found under "${inputPath}". ` +
+        `Please set the "path" and/or "registry" inputs explicitly.`,
+    );
+  }
+
+  return targets;
+}
+
+async function run(): Promise<void> {
+  const inputPath = core.getInput("path") || ".";
+  const registryInput = core.getInput("registry");
+  const version = core.getInput("version") || "latest";
+  const failSeverity = core.getInput("fail-on-severity") || "high";
+
+  const targets = resolveTargets(inputPath, registryInput);
+
+  if (targets.length === 1) {
+    core.info(`Auditing ${targets[0].path} (${targets[0].registry})`);
+  } else {
+    core.info(`Found ${targets.length} lockfiles to audit:`);
+    for (const t of targets) {
+      core.info(`  - ${t.path} (${t.registry})`);
+    }
+  }
+
+  // Download binary
+  const binaryPath = await downloadBinary(version);
+  core.info(`Using safe-pkgs at ${binaryPath}`);
+
+  // Audit each target
+  const results: { source: string; report: LockfileResponse }[] = [];
+  for (const target of targets) {
+    core.info(`Auditing ${target.path}...`);
+    const report = await runAudit(binaryPath, target.path, target.registry);
+    results.push({ source: target.path, report });
+  }
+
+  // Merge and process results
+  const merged =
+    results.length === 1 ? results[0].report : mergeReports(results);
+  await processReport(merged, failSeverity);
 }
 
 run().catch((err: Error) => {
