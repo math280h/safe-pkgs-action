@@ -1,0 +1,150 @@
+name: Test Action
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-action-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build dist
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test-npm:
+    name: Test npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Audit with auto-detection
+        id: autodetect
+        uses: ./
+        with:
+          path: tests/fixtures/npm
+          fail-on-severity: off
+        continue-on-error: true
+
+      - name: Verify auto-detection
+        run: |
+          if [ -z "${{ steps.autodetect.outputs.risk }}" ]; then
+            echo "::error::Auto-detection failed — no risk output"
+            exit 1
+          fi
+
+      - name: Audit with explicit registry
+        id: explicit
+        uses: ./
+        with:
+          path: tests/fixtures/npm
+          registry: npm
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.explicit.outputs.allow }}"
+          echo "risk: ${{ steps.explicit.outputs.risk }}"
+          echo "total: ${{ steps.explicit.outputs.total }}"
+          echo "denied: ${{ steps.explicit.outputs.denied }}"
+
+          if [ -z "${{ steps.explicit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
+
+  test-cargo:
+    name: Test cargo
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Audit cargo lockfile
+        id: audit
+        uses: ./
+        with:
+          path: tests/fixtures/cargo
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
+
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
+
+  test-pypi:
+    name: Test pypi
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Audit pypi lockfile
+        id: audit
+        uses: ./
+        with:
+          path: tests/fixtures/pypi
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
+
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
