@@ -33,8 +33,8 @@ jobs:
           name: dist
           path: dist/
 
-  test:
-    name: Integration tests
+  test-npm:
+    name: Test npm
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,74 +47,71 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Test npm lockfile audit
-        id: npm-audit
+      - name: Audit with auto-detection
+        id: autodetect
         uses: ./
         with:
           path: tests/fixtures/npm
-          fail-on-severity: critical
+          fail-on-severity: off
         continue-on-error: true
 
-      - name: Verify npm outputs
+      - name: Verify auto-detection
         run: |
-          echo "allow: ${{ steps.npm-audit.outputs.allow }}"
-          echo "risk: ${{ steps.npm-audit.outputs.risk }}"
-          echo "total: ${{ steps.npm-audit.outputs.total }}"
-          echo "denied: ${{ steps.npm-audit.outputs.denied }}"
-
-          if [ -z "${{ steps.npm-audit.outputs.total }}" ]; then
-            echo "::error::Missing 'total' output from npm audit"
+          if [ -z "${{ steps.autodetect.outputs.risk }}" ]; then
+            echo "::error::Auto-detection failed — no risk output"
             exit 1
           fi
 
-      - name: Test cargo lockfile audit
-        id: cargo-audit
+      - name: Audit with explicit registry
+        id: explicit
+        uses: ./
+        with:
+          path: tests/fixtures/npm
+          registry: npm
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.explicit.outputs.allow }}"
+          echo "risk: ${{ steps.explicit.outputs.risk }}"
+          echo "total: ${{ steps.explicit.outputs.total }}"
+          echo "denied: ${{ steps.explicit.outputs.denied }}"
+
+          if [ -z "${{ steps.explicit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
+
+  test-cargo:
+    name: Test cargo
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Audit cargo lockfile
+        id: audit
         uses: ./
         with:
           path: tests/fixtures/cargo
           fail-on-severity: critical
         continue-on-error: true
 
-      - name: Verify cargo outputs
+      - name: Verify outputs
         run: |
-          echo "allow: ${{ steps.cargo-audit.outputs.allow }}"
-          echo "risk: ${{ steps.cargo-audit.outputs.risk }}"
-          echo "total: ${{ steps.cargo-audit.outputs.total }}"
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
 
-          if [ -z "${{ steps.cargo-audit.outputs.total }}" ]; then
-            echo "::error::Missing 'total' output from cargo audit"
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
             exit 1
           fi
-
-      - name: Test auto-detection
-        id: autodetect-audit
-        uses: ./
-        with:
-          path: tests/fixtures/npm
-          fail-on-severity: off
-        continue-on-error: true
-
-      - name: Verify auto-detection worked
-        run: |
-          if [ -z "${{ steps.autodetect-audit.outputs.risk }}" ]; then
-            echo "::error::Auto-detection failed — no risk output"
-            exit 1
-          fi
-          echo "Auto-detection succeeded"
-
-      - name: Test explicit registry
-        id: explicit-audit
-        uses: ./
-        with:
-          path: tests/fixtures/npm
-          registry: npm
-          fail-on-severity: off
-        continue-on-error: true
-
-      - name: Verify explicit registry outputs
-        run: |
-          if [ -z "${{ steps.explicit-audit.outputs.total }}" ]; then
-            echo "::error::Missing 'total' output from explicit registry audit"
-            exit 1
-          fi
-          echo "Explicit registry test passed"
