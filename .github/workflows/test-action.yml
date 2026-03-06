@@ -115,3 +115,36 @@ jobs:
             echo "::error::Missing 'total' output"
             exit 1
           fi
+
+  test-pypi:
+    name: Test pypi
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Audit pypi lockfile
+        id: audit
+        uses: ./
+        with:
+          path: tests/fixtures/pypi
+          fail-on-severity: critical
+        continue-on-error: true
+
+      - name: Verify outputs
+        run: |
+          echo "allow: ${{ steps.audit.outputs.allow }}"
+          echo "risk: ${{ steps.audit.outputs.risk }}"
+          echo "total: ${{ steps.audit.outputs.total }}"
+
+          if [ -z "${{ steps.audit.outputs.total }}" ]; then
+            echo "::error::Missing 'total' output"
+            exit 1
+          fi
